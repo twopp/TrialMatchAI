@@ -102,17 +102,19 @@ Select the backend in `config.json`:
 
 ```json
 {
+  "use_cot_reasoning": false,
   "rag": {
     "enabled": true,
     "backend": "deepseek_api",
     "batch_size": 1,
-    "max_trials_rag": 20
+    "max_trials_rag": 20,
+    "no_think": true
   },
   "deepseek_api": {
     "base_url": "https://api.deepseek.com",
     "model": "deepseek-v4-pro",
-    "timeout_seconds": 60,
-    "max_tokens": 5000,
+    "timeout_seconds": 180,
+    "max_tokens": 10000,
     "temperature": 0,
     "max_retries": 3
   }

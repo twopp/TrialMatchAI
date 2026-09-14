@@ -36,7 +36,7 @@ class FakeResponse:
         return self.body
 
 
-def _processor(**overrides):
+def _processor(*, no_think=False, **overrides):
     settings = {
         "base_url": "https://api.deepseek.com/",
         "model": "deepseek-v4-pro",
@@ -51,6 +51,7 @@ def _processor(**overrides):
         settings=settings,
         batch_size=1,
         use_cot=False,
+        no_think=no_think,
     )
 
 
@@ -89,6 +90,20 @@ def test_request_and_persistence(tmp_path, monkeypatch):
     ]
     assert json.loads((tmp_path / "NCT1.json").read_text()) == VALID_ASSESSMENT
     assert "Final Decision" in (tmp_path / "NCT1.txt").read_text()
+
+
+def test_no_think_disables_provider_thinking(tmp_path, monkeypatch):
+    proc = _processor(no_think=True)
+    seen = []
+
+    def post(url, **kwargs):
+        seen.append(kwargs["json"])
+        return FakeResponse()
+
+    monkeypatch.setattr(proc.session, "post", post)
+    proc._process_batch([{"nct_id": "NCT4", "prompt": "synthetic prompt"}], str(tmp_path))
+    assert seen[0]["thinking"] == {"type": "disabled"}
+    assert json.loads((tmp_path / "NCT4.json").read_text()) == VALID_ASSESSMENT
 
 
 @pytest.mark.parametrize(

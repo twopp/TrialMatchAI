@@ -57,20 +57,23 @@ class BatchTrialProcessorDeepSeek(BaseTrialProcessor):
         return "Assessing Trials with DeepSeek"
 
     def _request(self, prompt: str) -> str:
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"},
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "stream": False,
+        }
+        if self.no_think:
+            payload["thinking"] = {"type": "disabled"}
         response = self.session.post(
             f"{self.base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"},
-                "max_tokens": self.max_tokens,
-                "temperature": self.temperature,
-                "stream": False,
-            },
+            json=payload,
             timeout=self.timeout_seconds,
         )
         response.raise_for_status()
