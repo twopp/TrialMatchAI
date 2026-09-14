@@ -93,6 +93,46 @@ settings. Rankings record their mode and assessment availability; reports label
 retrieval-only results and suppress assessments left over from earlier runs.
 Missing or unusable assessment outputs are not an eligibility verdict.
 
+### Use DeepSeek for eligibility assessment
+
+This source branch can run the criterion-level eligibility stage through the
+DeepSeek online API while keeping retrieval and reranking unchanged. Copy
+`.env.example` to `.env`, set `DEEPSEEK_API_KEY`, and do not commit that file.
+Select the backend in `config.json`:
+
+```json
+{
+  "rag": {
+    "enabled": true,
+    "backend": "deepseek_api",
+    "batch_size": 1,
+    "max_trials_rag": 20
+  },
+  "deepseek_api": {
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-v4-pro",
+    "timeout_seconds": 60,
+    "max_tokens": 5000,
+    "temperature": 0,
+    "max_retries": 3
+  }
+}
+```
+
+Run the normal pipeline with synthetic data first:
+
+```bash
+uv sync --frozen
+uv run trialmatchai e2e --config config.json --input synthetic-patient.txt --format text
+```
+
+Each assessed trial produces a raw `.txt` model response and a parsed `.json`
+assessment under the patient's result directory. The API key is environment-only;
+the endpoint and model name are recorded with run metadata so resume does not mix
+results from different provider settings. Patient and trial text sent for
+eligibility assessment leaves the local machine and is processed by the configured
+DeepSeek service.
+
 **Migration from 0.9.0:** to disable assessment, explicitly set `rag.enabled: false`.
 Setting only `use_cot_reasoning: false` now keeps assessment enabled. Legacy matches
 without the new mode metadata are recomputed when matching resumes; changing the

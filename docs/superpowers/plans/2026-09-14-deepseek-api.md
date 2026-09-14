@@ -1,6 +1,6 @@
 # DeepSeek Online Eligibility Assessment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add a DeepSeek online backend to TrialMatchAI's criterion-level eligibility assessment while preserving existing output, resume, and ranking behavior.
 
@@ -37,17 +37,17 @@
 - Produces: `rag.backend` accepting `"deepseek_api"`.
 - Consumes later: `config["deepseek_api"]` and `os.environ["DEEPSEEK_API_KEY"]`.
 
-- [ ] **Step 1: Add failing settings tests**
+- [x] **Step 1: Add failing settings tests**
 
 Add tests that load a config with `rag.backend = "deepseek_api"`, assert the six DeepSeek settings and defaults survive validation, and assert environment overrides update base URL and model without accepting an API key in the config object.
 
-- [ ] **Step 2: Run the focused tests and verify the backend is rejected**
+- [x] **Step 2: Run the focused tests and verify the backend is rejected**
 
 Run: `pytest -q tests/test_config_settings.py tests/test_assessment_controls.py tests/test_preflight.py`
 
 Expected: failure because `RagSettings.backend` rejects `deepseek_api` or `deepseek_api` settings are absent.
 
-- [ ] **Step 3: Implement settings, environment overrides, provenance, and preflight**
+- [x] **Step 3: Implement settings, environment overrides, provenance, and preflight**
 
 Add:
 
@@ -63,7 +63,7 @@ class DeepSeekAPISettings(BaseModel):
 
 Add `deepseek_api` to the RAG backend literal, attach the settings to `TrialMatchSettings`, add non-secret environment overrides, include model/endpoint identity in assessment settings, and require a non-empty `DEEPSEEK_API_KEY` during online-backend preflight without logging its value.
 
-- [ ] **Step 4: Wire backend construction in `run_rag_processing`**
+- [x] **Step 4: Wire backend construction in `run_rag_processing`**
 
 Instantiate:
 
@@ -79,7 +79,7 @@ BatchTrialProcessorDeepSeek(
 
 Keep the current `transformers` and `vllm` branches unchanged.
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
 Run: `pytest -q tests/test_config_settings.py tests/test_assessment_controls.py tests/test_preflight.py`
 
@@ -100,7 +100,7 @@ Commit: `feat: configure DeepSeek eligibility backend`
 - Produces: `BatchTrialProcessorDeepSeek._process_batch(batch: list[dict], output_folder: str) -> None`.
 - Produces: per-trial `.txt` raw output and `.json` parsed assessment files.
 
-- [ ] **Step 1: Write failing request and persistence tests**
+- [x] **Step 1: Write failing request and persistence tests**
 
 Mock `requests.Session.post` and assert the request uses:
 
@@ -117,17 +117,17 @@ Mock `requests.Session.post` and assert the request uses:
 
 Assert the bearer header is present, the raw response is written, and the parsed JSON contains inclusion/exclusion evaluations and `Final Decision`.
 
-- [ ] **Step 2: Run the processor test and verify import failure**
+- [x] **Step 2: Run the processor test and verify import failure**
 
 Run: `pytest -q tests/test_eligibility_deepseek.py`
 
 Expected: failure because `eligibility_reasoning_deepseek` does not exist.
 
-- [ ] **Step 3: Implement request transport**
+- [x] **Step 3: Implement request transport**
 
 Create a processor that normalizes `base_url`, posts to `<base_url>/chat/completions`, sets JSON content and bearer authorization headers, uses the configured timeout, and calls `raise_for_status()`.
 
-- [ ] **Step 4: Implement strict response validation and safe persistence**
+- [x] **Step 4: Implement strict response validation and safe persistence**
 
 Validate all of the following before a response counts as successful:
 
@@ -142,11 +142,11 @@ assert isinstance(parsed.get("Final Decision"), str)
 
 Write failures with the existing retryable error-output convention. Do not include patient prompts, authorization headers, or response bodies in log messages.
 
-- [ ] **Step 5: Add retry and secrecy tests**
+- [x] **Step 5: Add retry and secrecy tests**
 
 Test timeout, HTTP 429, HTTP 500, empty content, malformed JSON, and recovery on a later attempt. Capture logs and serialized outputs and assert neither the API key nor the synthetic patient narrative appears.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `pytest -q tests/test_eligibility_deepseek.py tests/test_eligibility_base.py`
 
@@ -167,7 +167,7 @@ Commit: `feat: assess trial eligibility with DeepSeek API`
 - Produces: documented `.env` and `config.json` setup.
 - Produces: optional live test selected with `TRIALMATCHAI_RUN_DEEPSEEK_LIVE=1`.
 
-- [ ] **Step 1: Add environment and README instructions**
+- [x] **Step 1: Add environment and README instructions**
 
 Document:
 
@@ -179,11 +179,11 @@ TRIALMATCHAI_DEEPSEEK_MODEL=deepseek-v4-pro
 
 Show `rag.backend: "deepseek_api"`, explain that `.env` is ignored, and provide a synthetic-data invocation that reuses the normal TrialMatchAI pipeline.
 
-- [ ] **Step 2: Add an opt-in live smoke test**
+- [x] **Step 2: Add an opt-in live smoke test**
 
 The test skips unless both `DEEPSEEK_API_KEY` and `TRIALMATCHAI_RUN_DEEPSEEK_LIVE=1` are present. It sends a synthetic adult-patient prompt with one age inclusion criterion and asserts a non-empty, schema-valid assessment without printing the response or secret.
 
-- [ ] **Step 3: Run formatting and relevant test suites**
+- [x] **Step 3: Run formatting and relevant test suites**
 
 Run:
 
@@ -194,13 +194,13 @@ pytest -q tests/test_eligibility_deepseek.py tests/test_config_settings.py tests
 
 Expected: lint and focused tests pass.
 
-- [ ] **Step 4: Run the live smoke test**
+- [x] **Step 4: Run the live smoke test**
 
 Run: `TRIALMATCHAI_RUN_DEEPSEEK_LIVE=1 pytest -q tests/test_deepseek_live.py`
 
 Expected: one live test passes and produces no key or patient narrative in output.
 
-- [ ] **Step 5: Run the full suite and inspect the diff**
+- [x] **Step 5: Run the full suite and inspect the diff**
 
 Run:
 
@@ -212,6 +212,6 @@ git status --short
 
 Expected: full suite passes; only intended implementation, tests, and documentation are changed.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit: `docs: explain DeepSeek online assessment`

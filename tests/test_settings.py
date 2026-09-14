@@ -17,15 +17,18 @@ class TestConfigLoading(unittest.TestCase):
         self.assertEqual(defaults["max_retries"], 3)
         os.environ["TRIALMATCHAI_DEEPSEEK_BASE_URL"] = "https://example.invalid/v1"
         os.environ["TRIALMATCHAI_DEEPSEEK_MODEL"] = "deepseek-test"
+        os.environ["TRIALMATCHAI_RAG_BACKEND"] = "deepseek_api"
         os.environ["DEEPSEEK_API_KEY"] = "must-not-enter-config"
         try:
             updated = apply_env_overrides({})
         finally:
             os.environ.pop("TRIALMATCHAI_DEEPSEEK_BASE_URL", None)
             os.environ.pop("TRIALMATCHAI_DEEPSEEK_MODEL", None)
+            os.environ.pop("TRIALMATCHAI_RAG_BACKEND", None)
             os.environ.pop("DEEPSEEK_API_KEY", None)
         self.assertEqual(updated["deepseek_api"]["base_url"], "https://example.invalid/v1")
         self.assertEqual(updated["deepseek_api"]["model"], "deepseek-test")
+        self.assertEqual(updated["rag"]["backend"], "deepseek_api")
         self.assertNotIn("api_key", updated["deepseek_api"])
     def test_load_config_from_repo(self) -> None:
         config_path = Path(__file__).resolve().parents[1] / "src/trialmatchai/config/config.json"

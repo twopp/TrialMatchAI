@@ -353,6 +353,7 @@ def apply_env_overrides(raw: Dict[str, Any]) -> Dict[str, Any]:
         "TRIALMATCHAI_SEARCH_TRIALS_TABLE": ("search_backend", "trials_table"),
         "TRIALMATCHAI_SEARCH_CRITERIA_TABLE": ("search_backend", "criteria_table"),
         "TRIALMATCHAI_SEARCH_MODE": ("search", "mode"),
+        "TRIALMATCHAI_RAG_BACKEND": ("rag", "backend"),
         "TRIALMATCHAI_EMBEDDER_MODEL_NAME": ("embedder", "model_name"),
         "TRIALMATCHAI_EMBEDDER_REVISION": ("embedder", "revision"),
         "TRIALMATCHAI_MODEL_BASE_MODEL": ("model", "base_model"),
