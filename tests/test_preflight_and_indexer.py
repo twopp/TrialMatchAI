@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from trialmatchai.config.config_loader import load_config
 from trialmatchai.search import InMemorySearchBackend
 from trialmatchai.services import preflight
@@ -137,6 +139,21 @@ def test_preflight_allows_transformers_cpu_llm_backend(tmp_path, monkeypatch):
     issues = run_preflight_checks(cfg, require_models=True)
 
     assert issues == []
+
+
+def test_preflight_requires_deepseek_key_without_local_model(tmp_path, monkeypatch):
+    cfg = _base_config(tmp_path)
+    cfg["LLM_reranker"] = {"enabled": False}
+    cfg["rag"] = {"enabled": True, "backend": "deepseek_api"}
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setattr(preflight, "check_hf_access", lambda models: pytest.fail(str(models)))
+
+    assert run_preflight_checks(cfg, require_models=True) == [
+        "rag.backend=deepseek_api requires DEEPSEEK_API_KEY in the environment."
+    ]
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "configured-for-test")
+    assert run_preflight_checks(cfg, require_models=True) == []
 
 
 def test_preflight_reports_missing_entity_extra(tmp_path, monkeypatch):

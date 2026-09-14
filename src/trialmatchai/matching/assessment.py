@@ -13,13 +13,20 @@ def assessment_enabled(config: Mapping) -> bool:
 
 
 def assessment_settings(config: Mapping) -> dict:
-    return {
+    settings = {
         "enabled": assessment_enabled(config),
         "use_cot_reasoning": bool(config.get("use_cot_reasoning", True)),
         "backend": config.get("rag", {}).get("backend", "vllm"),
         "no_think": bool(config.get("rag", {}).get("no_think", False)),
         "max_trials_rag": config.get("rag", {}).get("max_trials_rag", 20),
     }
+    if settings["backend"] == "deepseek_api":
+        deepseek = config.get("deepseek_api", {})
+        settings["provider"] = {
+            "base_url": deepseek.get("base_url", "https://api.deepseek.com"),
+            "model": deepseek.get("model", "deepseek-v4-pro"),
+        }
+    return settings
 
 
 def has_assessment_output(value: object) -> bool:

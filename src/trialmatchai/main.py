@@ -392,7 +392,19 @@ def run_rag_processing(
 
     rag_cfg = config.get("rag", {})
     rag_backend = str(rag_cfg.get("backend", "vllm"))
-    if rag_backend == "transformers":
+    if rag_backend == "deepseek_api":
+        from trialmatchai.matching.eligibility_reasoning_deepseek import (
+            BatchTrialProcessorDeepSeek,
+        )
+
+        rag_processor = BatchTrialProcessorDeepSeek(
+            api_key=os.environ["DEEPSEEK_API_KEY"],
+            settings=config.get("deepseek_api", {}),
+            batch_size=rag_cfg.get("batch_size", 1),
+            use_cot=config.get("use_cot_reasoning", True),
+            no_think=rag_cfg.get("no_think", False),
+        )
+    elif rag_backend == "transformers":
         from trialmatchai.matching.eligibility_reasoning_transformers import (
             BatchTrialProcessorTransformers,
         )

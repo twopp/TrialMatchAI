@@ -221,7 +221,7 @@ class ConstraintSettings(BaseModel):
 
 class RagSettings(BaseModel):
     enabled: bool = Field(True, description="Run eligibility assessment; independent of CoT prompt style.")
-    backend: Literal["vllm", "transformers"] = "vllm"
+    backend: Literal["vllm", "transformers", "deepseek_api"] = "vllm"
     batch_size: int = Field(4, ge=1)
     max_trials_rag: int = Field(20, ge=1)
     # Suppress chain-of-thought <think> in the eligibility stage for reasoning models (Qwen3):
@@ -258,6 +258,16 @@ class VllmSettings(BaseModel):
     # Keep undeclared vLLM runtime knobs (e.g. swap_space, enable_prefix_caching) — they reach
     # load_vllm_engine's tolerant .get() via the non-lossy loader, no new field required.
     model_config = ConfigDict(extra="allow")
+
+
+class DeepSeekAPISettings(BaseModel):
+    base_url: str = "https://api.deepseek.com"
+    model: str = "deepseek-v4-pro"
+    timeout_seconds: float = Field(60.0, gt=0)
+    max_tokens: int = Field(5000, ge=1)
+    temperature: float = Field(0.0, ge=0.0, le=2.0)
+    max_retries: int = Field(3, ge=1)
+    model_config = ConfigDict(extra="forbid")
 
 
 class CotSettings(BaseModel):
@@ -321,6 +331,7 @@ class TrialMatchSettings(BaseModel):
     use_cot_reasoning: bool = Field(True, description="Use the CoT assessment prompt; false selects direct JSON assessment.")
     rag: RagSettings
     vllm: VllmSettings
+    deepseek_api: DeepSeekAPISettings = Field(default_factory=DeepSeekAPISettings)
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump(by_alias=True)
@@ -381,6 +392,8 @@ def apply_env_overrides(raw: Dict[str, Any]) -> Dict[str, Any]:
         "TRIALMATCHAI_REGISTRY_RAW_DIR": ("registry", "raw_dir"),
         "TRIALMATCHAI_REGISTRY_MANIFEST_PATH": ("registry", "manifest_path"),
         "TRIALMATCHAI_REGISTRY_REPORTS_DIR": ("registry", "reports_dir"),
+        "TRIALMATCHAI_DEEPSEEK_BASE_URL": ("deepseek_api", "base_url"),
+        "TRIALMATCHAI_DEEPSEEK_MODEL": ("deepseek_api", "model"),
     }
     for env_key, path in string_env_map.items():
         value = os.getenv(env_key)
@@ -470,6 +483,8 @@ def apply_env_overrides(raw: Dict[str, Any]) -> Dict[str, Any]:
         "TRIALMATCHAI_RAG_MAX_TRIALS": ("rag", "max_trials_rag"),
         "TRIALMATCHAI_VLLM_BATCH_SIZE": ("vllm", "batch_size"),
         "TRIALMATCHAI_VLLM_MAX_NEW_TOKENS": ("vllm", "max_new_tokens"),
+        "TRIALMATCHAI_DEEPSEEK_MAX_TOKENS": ("deepseek_api", "max_tokens"),
+        "TRIALMATCHAI_DEEPSEEK_MAX_RETRIES": ("deepseek_api", "max_retries"),
     }
     for env_key, path in int_env_map.items():
         value = os.getenv(env_key)
@@ -511,6 +526,8 @@ def apply_env_overrides(raw: Dict[str, Any]) -> Dict[str, Any]:
             "first_level",
             "vector_score_threshold",
         ),
+        "TRIALMATCHAI_DEEPSEEK_TIMEOUT_SECONDS": ("deepseek_api", "timeout_seconds"),
+        "TRIALMATCHAI_DEEPSEEK_TEMPERATURE": ("deepseek_api", "temperature"),
     }
     for env_key, path in float_env_map.items():
         value = os.getenv(env_key)

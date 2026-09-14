@@ -142,5 +142,13 @@
     "gpu_memory_utilization": 0.5,
     "max_model_len": 8192,
     "tensor_parallel_size": 1
+  },
+  "deepseek_api": {
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-v4-pro",
+    "timeout_seconds": 60.0,
+    "max_tokens": 5000,
+    "temperature": 0.0,
+    "max_retries": 3
   }
 }

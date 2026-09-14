@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -94,6 +95,12 @@ def run_preflight_checks(
         needs_transformers = (rag_enabled and rag_backend == "transformers") or (
             reranker_enabled and reranker_backend == "transformers"
         )
+        if rag_enabled and rag_backend == "deepseek_api" and not os.getenv(
+            "DEEPSEEK_API_KEY", ""
+        ).strip():
+            issues.append(
+                "rag.backend=deepseek_api requires DEEPSEEK_API_KEY in the environment."
+            )
         # vLLM is the production backend; CPU smoke configs use Transformers (no CUDA).
         if needs_vllm:
             vllm_available = importlib.util.find_spec("vllm") is not None
@@ -124,7 +131,7 @@ def run_preflight_checks(
         # Check gated base models up front so an HF auth failure surfaces here, not
         # after first-level search.
         requested_models = []
-        if rag_enabled:
+        if rag_enabled and rag_backend in {"vllm", "transformers"}:
             requested_models.append(model_cfg.get("base_model"))
         if reranker_enabled:
             requested_models.append(model_cfg.get("reranker_model_path"))

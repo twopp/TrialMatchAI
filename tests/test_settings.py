@@ -7,6 +7,26 @@ from trialmatchai.config.settings import apply_env_overrides
 
 
 class TestConfigLoading(unittest.TestCase):
+    def test_deepseek_settings_and_env_overrides(self) -> None:
+        from trialmatchai.config.settings import DeepSeekAPISettings, RagSettings
+
+        self.assertEqual(RagSettings(backend="deepseek_api").backend, "deepseek_api")
+        defaults = DeepSeekAPISettings().model_dump()
+        self.assertEqual(defaults["base_url"], "https://api.deepseek.com")
+        self.assertEqual(defaults["model"], "deepseek-v4-pro")
+        self.assertEqual(defaults["max_retries"], 3)
+        os.environ["TRIALMATCHAI_DEEPSEEK_BASE_URL"] = "https://example.invalid/v1"
+        os.environ["TRIALMATCHAI_DEEPSEEK_MODEL"] = "deepseek-test"
+        os.environ["DEEPSEEK_API_KEY"] = "must-not-enter-config"
+        try:
+            updated = apply_env_overrides({})
+        finally:
+            os.environ.pop("TRIALMATCHAI_DEEPSEEK_BASE_URL", None)
+            os.environ.pop("TRIALMATCHAI_DEEPSEEK_MODEL", None)
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+        self.assertEqual(updated["deepseek_api"]["base_url"], "https://example.invalid/v1")
+        self.assertEqual(updated["deepseek_api"]["model"], "deepseek-test")
+        self.assertNotIn("api_key", updated["deepseek_api"])
     def test_load_config_from_repo(self) -> None:
         config_path = Path(__file__).resolve().parents[1] / "src/trialmatchai/config/config.json"
         config = load_config(str(config_path))

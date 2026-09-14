@@ -187,6 +187,23 @@ def test_match_signature_tracks_assessment_controls():
     assert assessment_settings({})["enabled"] is True
 
 
+def test_deepseek_assessment_provenance_excludes_secret():
+    config = {
+        "rag": {"backend": "deepseek_api"},
+        "deepseek_api": {
+            "base_url": "https://api.deepseek.com",
+            "model": "deepseek-v4-pro",
+            "api_key": "must-not-be-serialized",
+        },
+    }
+    settings = assessment_settings(config)
+    assert settings["provider"] == {
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-v4-pro",
+    }
+    assert "must-not-be-serialized" not in json.dumps(settings)
+
+
 def test_shortlist_budget_change_invalidates_resume(pipeline):
     from trialmatchai.orchestration import count_pending
 
