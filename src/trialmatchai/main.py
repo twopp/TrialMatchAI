@@ -584,10 +584,15 @@ def main_pipeline(
                     TransformersReranker,
                 )
 
+                reranker_cfg = config.get("LLM_reranker", {})
                 llm_reranker = TransformersReranker(
                     model_path=config["model"]["reranker_model_path"],
-                    device=str(config["global"]["device"]),
-                    batch_size=config.get("LLM_reranker", {}).get("batch_size", 8),
+                    device=str(
+                        reranker_cfg.get("device", config["global"]["device"])
+                    ),
+                    batch_size=reranker_cfg.get("batch_size", 8),
+                    model_family=str(reranker_cfg.get("model_family", "auto")),
+                    max_length=int(reranker_cfg.get("max_length", 4096)),
                     revision=config["model"].get("reranker_model_revision"),
                     trust_remote_code=config["model"].get("trust_remote_code", False),
                 )
@@ -624,6 +629,7 @@ def main_pipeline(
         search_backend=search_backend,
         llm_reranker=llm_reranker,
         embedder=embedder,
+        size=int(config["search"].get("second_level_criteria_per_query", 250)),
         entity_annotator=entity_annotator,
         search_mode=config["search"].get("mode", "hybrid"),
     )

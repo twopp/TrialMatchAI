@@ -179,6 +179,9 @@ class SearchSettings(BaseModel):
     vector_score_threshold: float = Field(0.5, ge=0.0, le=1.0)
     max_trials_first_level: int = Field(1000, ge=1)
     max_trials_second_level: int = Field(100, ge=1)
+    # Number of criterion hits scored for each second-level query. Keep the production
+    # default, while allowing small local registries to avoid scoring redundant tail hits.
+    second_level_criteria_per_query: int = Field(250, ge=1)
     # Keep the top 1/N of reranked second-level trials before CoT (N=1 keeps all).
     second_level_keep_divisor: int = Field(3, ge=1)
     # How the shortlist fuses first-level (retrieval) and second-level (reranker) rankings. "rrf"
@@ -278,6 +281,11 @@ class LLMRerankerSettings(BaseModel):
     enabled: bool = True
     backend: Literal["vllm", "transformers"] = "vllm"
     batch_size: int = Field(20, ge=1)
+    # Transformers backend controls. A stage-specific device avoids reusing the legacy
+    # CUDA-oriented numeric global.device on Apple Silicon.
+    device: str = "auto"
+    model_family: Literal["auto", "generic", "qwen3"] = "auto"
+    max_length: int = Field(4096, ge=256)
     # vLLM reranker engine's share of GPU memory; lower it (with vllm.gpu_memory_utilization)
     # to fit both engines on a smaller card (e.g. 48GB A40/L40).
     gpu_memory_utilization: float = Field(0.4, gt=0.0, le=1.0)
