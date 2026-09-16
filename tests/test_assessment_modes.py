@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from trialmatchai.matching.assessment import assessment_run_info, assessment_settings, match_controls_current, match_is_complete
+from trialmatchai.matching.assessment import (
+    assessment_run_info,
+    assessment_settings,
+    match_controls_current,
+    match_is_complete,
+    reusable_assessment_ids,
+)
 from trialmatchai.matching.eligibility_base import BaseTrialProcessor
 from trialmatchai.utils.file_utils import write_json_file, write_text_file
 
@@ -37,6 +43,43 @@ def test_default_assessment_remains_enabled_with_direct_json_prompt():
     assert "Inclusion_Criteria_Evaluation" in prompt and "Exclusion_Criteria_Evaluation" in prompt
     assert "Final Decision" in prompt
     assert "chain of thoughts" not in prompt
+
+
+def test_reusable_assessment_accepts_safe_custom_trial_id(tmp_path):
+    config = {
+        "rag": {
+            "enabled": True,
+            "backend": "deepseek_api",
+            "max_trials_rag": 6,
+            "no_think": True,
+        },
+        "use_cot_reasoning": False,
+        "deepseek_api": {
+            "base_url": "https://api.deepseek.com",
+            "model": "deepseek-v4-pro",
+        },
+    }
+    ranked_path = tmp_path / "ranked_trials.json"
+    ranked_path.write_text(
+        json.dumps(
+            {
+                "RankedTrials": [{"TrialID": "ALSC013AST2818", "Score": 1.0}],
+                "Run": {
+                    "schema_version": 1,
+                    "assessment": assessment_settings(config),
+                    "mode": "eligibility_assessment",
+                    "assessment_status": "outputs_available",
+                    "assessed_trial_ids": ["ALSC013AST2818"],
+                    "candidate_count": 1,
+                },
+            }
+        )
+    )
+    (tmp_path / "ALSC013AST2818.json").write_text(
+        json.dumps({"Final Decision": "Eligible"})
+    )
+
+    assert reusable_assessment_ids(ranked_path, config) == {"ALSC013AST2818"}
 
 
 @pytest.fixture

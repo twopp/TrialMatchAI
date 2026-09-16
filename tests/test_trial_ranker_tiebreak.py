@@ -75,3 +75,22 @@ def test_load_trial_data_scopes_to_allowed_ids(tmp_path):
         for t in load_trial_data(str(tmp_path), allowed_ids={"NCT1", "NCT3"})
     }
     assert loaded == {"NCT1", "NCT3"}  # NCT2 (stale, off-shortlist) excluded
+
+
+def test_load_trial_data_accepts_explicit_custom_trial_id(tmp_path):
+    (tmp_path / "ALSC013AST2818.json").write_text(
+        json.dumps(
+            {
+                "Final Decision": "Eligible",
+                "Inclusion_Criteria_Evaluation": [{"Classification": "Met"}],
+                "Exclusion_Criteria_Evaluation": [],
+            }
+        )
+    )
+    (tmp_path / "rag_output.json").write_text(json.dumps({"status": "done"}))
+
+    loaded = load_trial_data(
+        str(tmp_path), allowed_ids={"ALSC013AST2818"}
+    )
+
+    assert [trial["TrialID"] for trial in loaded] == ["ALSC013AST2818"]

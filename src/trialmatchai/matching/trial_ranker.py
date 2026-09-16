@@ -1,6 +1,7 @@
 import os
 from typing import Dict, List
 
+from trialmatchai.matching.assessment import is_safe_trial_id
 from trialmatchai.utils.file_utils import read_json_file, write_json_file
 from trialmatchai.utils.logging_config import setup_logging
 
@@ -16,13 +17,21 @@ def load_trial_data(
     prior run (different shortlist) are not scored into the final ranking.
     """
     trial_data = []
+    safe_allowed_ids = (
+        {trial_id for trial_id in allowed_ids if is_safe_trial_id(trial_id)}
+        if allowed_ids is not None
+        else None
+    )
     for file_name in os.listdir(json_folder):
-        # Only NCT-named files are trials; skip run sidecars (keywords.json, etc.)
-        # that would otherwise be scored as bogus trials.
-        if file_name.endswith(".json") and file_name.upper().startswith("NCT"):
+        if file_name.endswith(".json"):
             file_path = os.path.join(json_folder, file_name)
             trial_id = os.path.splitext(file_name)[0]
-            if allowed_ids is not None and trial_id not in allowed_ids:
+            # The explicit shortlist safely distinguishes custom-registry outputs
+            # from run sidecars. Preserve the legacy NCT-only unscoped behavior.
+            if safe_allowed_ids is not None:
+                if trial_id not in safe_allowed_ids:
+                    continue
+            elif not trial_id.upper().startswith("NCT"):
                 continue
             try:
                 trial = read_json_file(file_path)
@@ -172,7 +181,8 @@ def save_ranked_trials(ranked_trials: List[Dict], output_file: str, *, run_info:
 def rerank_patient_dir(patient_dir: str) -> int:
     """Re-rank one patient's cached chain-of-thought outputs with the current scoring,
     overwriting ``ranked_trials.json`` in place. No model inference — reuses the stored per-trial
-    ``NCT*.json`` outputs plus the reranker/first-level scores in ``ranked_trials.json``, so a
+    per-trial assessment outputs plus the reranker/first-level scores in
+    ``ranked_trials.json``, so a
     ranking-logic change re-applies to a finished run without re-matching. Returns the number of
     trials ranked (0 = skipped).
     """

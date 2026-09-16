@@ -3,8 +3,30 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
+
+
+_SAFE_TRIAL_ID = re.compile(r"^[^\W_][\w.-]{0,127}$", re.UNICODE)
+_RESERVED_RESULT_STEMS = {
+    "constraint_evaluations",
+    "first_level_candidates",
+    "first_level_query_plan",
+    "first_level_scores",
+    "keywords",
+    "patient_profile",
+    "rag_output",
+    "ranked_trials",
+    "top_trials_explained",
+}
+
+
+def is_safe_trial_id(value: object) -> bool:
+    """Return whether a registry trial ID is safe to use as a result filename."""
+    if not isinstance(value, str) or not _SAFE_TRIAL_ID.fullmatch(value):
+        return False
+    return ".." not in value and value.casefold() not in _RESERVED_RESULT_STEMS
 
 
 def assessment_enabled(config: Mapping) -> bool:
@@ -75,8 +97,9 @@ def reusable_assessment_ids(path: str | Path, config: Mapping) -> set[str]:
         return set()
     available = set()
     for trial_id in ids:
-        # Per-trial outputs are NCT files, never paths supplied by result metadata.
-        if not isinstance(trial_id, str) or not trial_id.isalnum() or not trial_id.upper().startswith("NCT"):
+        # Validate before joining metadata into a path. Local registries need not
+        # use the ClinicalTrials.gov NCT prefix.
+        if not is_safe_trial_id(trial_id):
             continue
         try:
             data = json.loads((Path(path).parent / f"{trial_id}.json").read_text(encoding="utf-8"))
