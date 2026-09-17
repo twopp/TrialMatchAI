@@ -10,7 +10,7 @@
 [![Python 3.11](https://img.shields.io/badge/python-3.11-2563EB)](https://github.com/cbib/TrialMatchAI/blob/main/pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-64748B)](https://github.com/cbib/TrialMatchAI/blob/main/LICENSE)
 
-[Try the demo](#try-the-demo) · [Run your own data](#run-your-own-data) · [Architecture](#how-matching-works) · [CLI](#cli-reference) · [Development](#development-and-delivery)
+[Try the demo](#try-the-demo) · [中文 Mac 教程](docs/mac-chinese-setup.md) · [Run your own data](#run-your-own-data) · [Architecture](#how-matching-works) · [CLI](#cli-reference) · [Development](#development-and-delivery)
 
 </div>
 
@@ -151,6 +151,8 @@ is disabled by default. See the [actual defaults](https://github.com/cbib/TrialM
 and [pipeline guide](https://github.com/cbib/TrialMatchAI/blob/main/docs/pipeline.md) for stage controls and configuration.
 
 ## Run your own data
+
+Apple Silicon 用户如果要复现已经验证的中文模型组合（UIE-Medical-Base、BGE-M3、Qwen3-Reranker 和 DeepSeek），请直接阅读[中文 Mac 完整教程](docs/mac-chinese-setup.md)。教程包含经过验证的依赖版本、模型下载、示例配置、试验导入、患者匹配、报告位置和常见错误排查。
 
 ### 1. Select an environment and configuration
 

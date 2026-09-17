@@ -4,10 +4,11 @@ from pathlib import Path
 import pytest
 
 from trialmatchai.config.config_loader import load_config
-from trialmatchai.config.settings import EntityExtractionSettings
+from trialmatchai.config.settings import EntityExtractionSettings, TrialMatchSettings
 from trialmatchai.entities.schemas import default_schema_path
 
 REPO_CONFIG = Path(__file__).resolve().parents[1] / "src/trialmatchai/config/config.json"
+MAC_EXAMPLE_CONFIG = Path(__file__).resolve().parents[1] / "config.mac.example.json"
 
 
 def test_load_config_from_repo():
@@ -15,6 +16,23 @@ def test_load_config_from_repo():
     assert cfg["search_backend"]["backend"] == "lancedb"
     assert "embedder" in cfg
     assert "paths" in cfg
+
+
+def test_public_mac_example_is_valid_and_safe():
+    text = MAC_EXAMPLE_CONFIG.read_text(encoding="utf-8")
+    raw = json.loads(text)
+    settings = TrialMatchSettings.model_validate(raw)
+
+    assert settings.entity_extraction.backend == "uie"
+    assert settings.entity_extraction.python_path == ".venv-uie/bin/python"
+    assert settings.embedder.model_name == "BAAI/bge-m3"
+    assert settings.embedder.use_gpu is False
+    assert settings.LLM_reranker.backend == "transformers"
+    assert settings.LLM_reranker.device == "mps"
+    assert settings.model.reranker_model_path == "Qwen/Qwen3-Reranker-0.6B"
+    assert settings.rag.backend == "deepseek_api"
+    assert "DEEPSEEK_API_KEY" not in text
+    assert "/Users/" not in text
 
 
 def _write(tmp_path, cfg) -> str:
