@@ -65,6 +65,17 @@ class SchemaEntityAnnotator:
                     ]
         return results
 
+    def close(self) -> None:
+        close = getattr(self.recognizer, "close", None)
+        if callable(close):
+            close()
+
+    def runtime_status(self) -> dict[str, Any]:
+        status = getattr(self.recognizer, "runtime_status", None)
+        if callable(status):
+            return dict(status())
+        return {"active_backend": type(self.recognizer).__name__}
+
 
 def build_entity_annotator(
     config: dict[str, Any],

@@ -84,3 +84,22 @@ def test_legacy_gliner_backend_and_fallback_key_are_rejected():
 
     with pytest.raises(ValueError):
         EntityExtractionSettings.model_validate({"fallback_model_name": "old-model"})
+
+
+def test_uie_subprocess_settings_validate():
+    settings = EntityExtractionSettings.model_validate(
+        {
+            "backend": "uie",
+            "model_name": "uie-medical-base",
+            "python_path": ".venv-uie/bin/python",
+            "threshold": 0.5,
+            "batch_size": 8,
+            "startup_timeout_seconds": 30,
+            "request_timeout_seconds": 120,
+            "fallback_backend": "regex",
+        }
+    )
+
+    assert settings.backend == "uie"
+    assert settings.python_path == ".venv-uie/bin/python"
+    assert settings.fallback_backend == "regex"

@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class EntityExtractionSettings(BaseModel):
-    backend: Literal["gliner2", "regex", "disabled"] = "gliner2"
+    backend: Literal["gliner2", "uie", "regex", "disabled"] = "gliner2"
     model_name: str = "fastino/gliner2-base-v1"
     model_revision: str | None = None
     schema_path: str = "entity_schemas/trialmatchai.yaml"
@@ -17,6 +17,10 @@ class EntityExtractionSettings(BaseModel):
     batch_size: int = Field(8, ge=1)
     device: str = "auto"
     trust_remote_code: bool = False
+    python_path: str = ".venv-uie/bin/python"
+    startup_timeout_seconds: float = Field(30.0, gt=0)
+    request_timeout_seconds: float = Field(120.0, gt=0)
+    fallback_backend: Literal["regex", "disabled"] = "regex"
     # Augment model NER with the deterministic genetic-variant recognizer.
     variant_regex: bool = True
     model_config = ConfigDict(extra="forbid")

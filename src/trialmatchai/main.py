@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 from contextlib import nullcontext
 from pathlib import Path
 from shutil import copyfile
@@ -572,7 +573,16 @@ def main_pipeline(
     # Eligibility reasoning model is loaded lazily by run_rag_processing.
 
     embedder = build_embedder(config)
-    entity_annotator = build_entity_annotator(config, embedder=embedder)
+    entity_config = config
+    extraction_cfg = config.get("entity_extraction", {})
+    if extraction_cfg.get("backend") == "uie":
+        # UIE annotations are persisted during registry preparation. Matching uses the
+        # configured lightweight fallback so it does not reload UIE for every patient.
+        entity_config = deepcopy(config)
+        entity_config["entity_extraction"]["backend"] = extraction_cfg.get(
+            "fallback_backend", "regex"
+        )
+    entity_annotator = build_entity_annotator(entity_config, embedder=embedder)
 
     with warnings.catch_warnings():
         warnings.filterwarnings(

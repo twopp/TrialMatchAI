@@ -50,6 +50,13 @@ def run_preflight_checks(
             entity_cfg.get("schema_path"),
             required=True,
         )
+        if entity_cfg.get("backend") == "uie":
+            _require_path(
+                issues,
+                "entity_extraction.python_path",
+                entity_cfg.get("python_path"),
+                required=False,
+            )
 
     if require_models:
         reranker_enabled = _reranker_enabled(config)
@@ -251,7 +258,10 @@ def run_build_preflight(config: Dict[str, Any]) -> List[str]:
     ):
         issues.append("entity_extraction.backend=gliner2 requires `uv sync --extra entity`.")
 
-    issues += check_hf_access([embedder_cfg.get("model_name"), entity_cfg.get("model_name")])
+    hf_models = [embedder_cfg.get("model_name")]
+    if entity_cfg.get("backend", "gliner2") == "gliner2":
+        hf_models.append(entity_cfg.get("model_name"))
+    issues += check_hf_access(hf_models)
     for issue in issues:
         logger.error("Build preflight: %s", issue)
     return issues

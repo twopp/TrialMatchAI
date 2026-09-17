@@ -20,6 +20,7 @@ class EntitySchema:
     query_expansion: bool = False
     patterns: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
+    uie_prompt: str | None = None
 
     @property
     def is_linkable(self) -> bool:

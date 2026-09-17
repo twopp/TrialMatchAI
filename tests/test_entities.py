@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import sys
 from pathlib import Path
 
 from trialmatchai.entities.annotator import SchemaEntityAnnotator
@@ -11,8 +12,11 @@ from trialmatchai.entities.builder import (
 )
 from trialmatchai.entities.linker import ConceptLinker, InMemoryConceptStore
 from trialmatchai.entities.recognizers import (
+    FallbackRecognizer,
     RegexSchemaRecognizer,
+    UIESubprocessRecognizer,
     _parse_model_entities,
+    _parse_uie_results,
     resolve_overlaps,
 )
 from trialmatchai.entities.schemas import load_entity_schemas
@@ -36,6 +40,8 @@ def test_default_schema_validates_vocab_routing():
     # the variant schema links mutation entities to the cancer-genetics vocabularies
     assert by_id["variant"].target_vocabularies == ("CIViC", "ClinVar", "OncoKB")
     assert by_id["variant"].is_linkable
+    assert by_id["disease"].uie_prompt == "疾病"
+    assert by_id["variant"].uie_prompt == "基因突变"
 
 
 def test_regex_backend_returns_current_output_shape():
@@ -92,6 +98,106 @@ def test_overlap_resolution_keeps_higher_confidence_span():
 
     assert len(resolved) == 1
     assert resolved[0].text == "cancer"
+
+
+def test_uie_results_preserve_cross_type_overlap_and_apply_threshold():
+    schemas = {
+        schema.id: schema
+        for schema in load_entity_schemas()
+        if schema.id in {"gene", "variant", "medication"}
+    }
+    text = "存在EGFR L861Q突变，使用奥希替尼"
+    results = _parse_uie_results(
+        [
+            {
+                "基因": [
+                    {"text": "EGFR L861Q", "start": 2, "end": 12, "probability": 0.65}
+                ],
+                "基因突变": [
+                    {"text": "EGFR L861Q", "start": 2, "end": 12, "probability": 0.81}
+                ],
+                "药物": [
+                    {"text": "奥希替尼", "start": 17, "end": 21, "probability": 0.49}
+                ],
+            }
+        ],
+        [text],
+        [
+            ("基因", schemas["gene"]),
+            ("基因突变", schemas["variant"]),
+            ("药物", schemas["medication"]),
+        ],
+        threshold=0.5,
+    )
+
+    assert [(item.schema_id, item.text) for item in results[0]] == [
+        ("gene", "EGFR L861Q"),
+        ("variant", "EGFR L861Q"),
+    ]
+
+
+def test_uie_subprocess_reuses_worker(tmp_path):
+    worker = tmp_path / "fake_worker.py"
+    worker.write_text(
+        """
+import json, sys
+print(json.dumps({"type": "ready"}), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get("type") == "shutdown":
+        break
+    results = []
+    for text in request["texts"]:
+        results.append({"疾病": [{"text": text[:2], "start": 0, "end": 2, "probability": 0.9}]})
+    print(json.dumps({"id": request["id"], "results": results}, ensure_ascii=False), flush=True)
+""",
+        encoding="utf-8",
+    )
+    schema = next(schema for schema in load_entity_schemas() if schema.id == "disease")
+    recognizer = UIESubprocessRecognizer(
+        "fake",
+        python_path=sys.executable,
+        worker_path=worker,
+        startup_timeout_seconds=2,
+        request_timeout_seconds=2,
+    )
+    try:
+        first = recognizer.recognize(["肺癌患者"], [schema])
+        pid = recognizer._process.pid
+        second = recognizer.recognize(["肝癌患者"], [schema])
+        assert recognizer._process.pid == pid
+        assert first[0][0].text == "肺癌"
+        assert second[0][0].text == "肝癌"
+    finally:
+        recognizer.close()
+
+
+def test_failed_primary_permanently_falls_back(caplog):
+    class FailingRecognizer:
+        calls = 0
+
+        def recognize(self, texts, schemas):
+            self.calls += 1
+            raise RuntimeError("worker failed")
+
+    primary = FailingRecognizer()
+    fallback = RegexSchemaRecognizer()
+    recognizer = FallbackRecognizer(
+        primary,
+        fallback,
+        primary_name="uie",
+        fallback_name="regex",
+    )
+    schema = next(schema for schema in load_entity_schemas() if schema.id == "disease")
+
+    first = recognizer.recognize(["cancer"], [schema])
+    second = recognizer.recognize(["cancer"], [schema])
+
+    assert primary.calls == 1
+    assert first[0][0].text == "cancer"
+    assert second[0][0].text == "cancer"
+    assert recognizer.runtime_status()["fallback_used"] is True
+    assert "using regex" in caplog.text
 
 
 def test_concept_linker_accepts_rejects_and_marks_ambiguous():

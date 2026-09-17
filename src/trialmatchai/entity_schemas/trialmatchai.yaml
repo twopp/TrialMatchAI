@@ -2,6 +2,7 @@ version: 1
 entities:
   - id: disease
     label: disease or condition
+    uie_prompt: 疾病
     entity_group: disease
     description: Diagnosed diseases, clinical conditions, syndromes, and disorders.
     aliases: [condition, disorder, syndrome]
@@ -14,6 +15,7 @@ entities:
       - "\\b(?:cancer|carcinoma|diabetes|melanoma|leukemia|lymphoma|asthma|hypertension)\\b"
   - id: gene
     label: gene
+    uie_prompt: 基因
     entity_group: gene
     description: Human genes or gene products mentioned as trial criteria.
     aliases: [gene symbol, biomarker]
@@ -26,6 +28,7 @@ entities:
       - "\\b(?:BRCA1|BRCA2|EGFR|ALK|KRAS|BRAF|TP53|ERBB2|HER2)\\b"
   - id: medication
     label: drug or medication
+    uie_prompt: 药物
     entity_group: drug
     description: Drugs, medications, biologics, compounds, and therapeutic agents.
     aliases: [drug, medication, biologic, compound]
@@ -38,6 +41,7 @@ entities:
       - "\\b(?:aspirin|metformin|pembrolizumab|nivolumab|cisplatin|paclitaxel)\\b"
   - id: procedure
     label: procedure
+    uie_prompt: 治疗或医疗操作
     entity_group: procedure
     description: Clinical procedures, interventions, treatments, and surgeries.
     aliases: [treatment, surgical procedure, intervention]
@@ -50,6 +54,7 @@ entities:
       - "\\b(?:surgery|radiotherapy|chemotherapy|biopsy|transplantation)\\b"
   - id: diagnostic_test
     label: diagnostic test
+    uie_prompt: 诊断检查
     entity_group: diagnostic test
     description: Diagnostic assays and tests used to establish eligibility.
     aliases: [test, assay]
@@ -62,6 +67,7 @@ entities:
       - "\\b(?:MRI|CT scan|PET scan|biopsy|ECG|EKG)\\b"
   - id: laboratory_test
     label: laboratory test
+    uie_prompt: 实验室检查或检查指标
     entity_group: laboratory test
     description: Laboratory measurements, lab panels, biomarkers, and analytes.
     aliases: [lab test, laboratory value, analyte]
@@ -74,6 +80,7 @@ entities:
       - "\\b(?:hemoglobin|creatinine|ALT|AST|bilirubin|platelet count)\\b"
   - id: radiology
     label: radiology
+    uie_prompt: 影像检查或影像学发现
     entity_group: radiology
     description: Imaging modalities and radiology findings used in criteria.
     aliases: [imaging]
@@ -86,6 +93,7 @@ entities:
       - "\\b(?:radiograph|ultrasound|mammogram|MRI|CT)\\b"
   - id: sign_symptom
     label: sign or symptom
+    uie_prompt: 症状或体征
     entity_group: sign symptom
     description: Patient signs, symptoms, and clinical findings.
     aliases: [symptom, sign]
@@ -98,6 +106,7 @@ entities:
       - "\\b(?:fever|pain|fatigue|nausea|dyspnea|cough)\\b"
   - id: cell_type
     label: cell type
+    uie_prompt: 细胞类型
     entity_group: cell type
     description: Cell types, immune cells, and tissue cell populations.
     aliases: [cell population]
@@ -110,6 +119,7 @@ entities:
       - "\\b(?:T cell|B cell|macrophage|neutrophil|fibroblast)\\b"
   - id: species
     label: species
+    uie_prompt: 物种
     entity_group: species
     description: Species and organisms in translational eligibility criteria.
     aliases: [organism]
@@ -122,6 +132,7 @@ entities:
       - "\\b(?:human|mouse|rat|zebrafish|macaque)\\b"
   - id: variant
     label: genetic variant
+    uie_prompt: 基因突变
     entity_group: mutation
     description: Genetic variants, mutations, fusions, and molecular alterations used as biomarkers.
     aliases: [mutation, variant, genetic alteration, molecular alteration, fusion, rearrangement]

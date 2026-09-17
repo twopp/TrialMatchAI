@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import atexit
+import json
+import os
 import re
+import selectors
+import subprocess
+import tempfile
+import threading
 from importlib import resources
+from pathlib import Path
 from typing import Any, Protocol, Sequence
 
 from trialmatchai.entities.schemas import schema_by_label
@@ -166,8 +174,258 @@ class CompositeRecognizer:
             combined: list[EntityAnnotation] = []
             for recognizer_results in per_recognizer:
                 combined.extend(recognizer_results[i])
-            merged.append(resolve_overlaps(combined))
+            merged.append(resolve_overlaps_by_group(combined))
         return merged
+
+    def close(self) -> None:
+        for recognizer in self._recognizers:
+            close = getattr(recognizer, "close", None)
+            if callable(close):
+                close()
+
+    def runtime_status(self) -> dict[str, Any]:
+        status = getattr(self._recognizers[0], "runtime_status", None)
+        return status() if callable(status) else {"active_backend": "composite"}
+
+
+class FallbackRecognizer:
+    """Permanently switch to a safe recognizer after the primary first fails."""
+
+    def __init__(
+        self,
+        primary: EntityRecognizer,
+        fallback: EntityRecognizer,
+        *,
+        primary_name: str,
+        fallback_name: str,
+    ):
+        self.primary = primary
+        self.fallback = fallback
+        self.primary_name = primary_name
+        self.fallback_name = fallback_name
+        self._failed = False
+        self._failure_reason: str | None = None
+
+    def recognize(
+        self, texts: Sequence[str], schemas: Sequence[EntitySchema]
+    ) -> list[list[EntityAnnotation]]:
+        if self._failed:
+            return self.fallback.recognize(texts, schemas)
+        try:
+            return self.primary.recognize(texts, schemas)
+        except Exception as exc:
+            self._failed = True
+            self._failure_reason = str(exc)
+            close = getattr(self.primary, "close", None)
+            if callable(close):
+                close()
+            logger.warning(
+                "Entity extraction backend %s failed; using %s for this and "
+                "all remaining requests: %s",
+                self.primary_name,
+                self.fallback_name,
+                exc,
+            )
+            return self.fallback.recognize(texts, schemas)
+
+    def close(self) -> None:
+        for recognizer in (self.primary, self.fallback):
+            close = getattr(recognizer, "close", None)
+            if callable(close):
+                close()
+
+    def runtime_status(self) -> dict[str, Any]:
+        return {
+            "configured_backend": self.primary_name,
+            "active_backend": self.fallback_name if self._failed else self.primary_name,
+            "fallback_used": self._failed,
+            "fallback_reason": self._failure_reason,
+        }
+
+
+class UIESubprocessRecognizer:
+    """Run PaddleNLP UIE in a persistent, dependency-isolated subprocess."""
+
+    def __init__(
+        self,
+        model_name: str,
+        *,
+        python_path: str,
+        threshold: float = 0.5,
+        batch_size: int = 8,
+        startup_timeout_seconds: float = 30.0,
+        request_timeout_seconds: float = 120.0,
+        worker_path: str | Path | None = None,
+    ):
+        self.model_name = model_name
+        self.python_path = _resolve_executable(python_path)
+        self.threshold = float(threshold)
+        self.batch_size = int(batch_size)
+        self.startup_timeout_seconds = float(startup_timeout_seconds)
+        self.request_timeout_seconds = float(request_timeout_seconds)
+        self.worker_path = Path(worker_path or Path(__file__).with_name("uie_worker.py"))
+        self._process: subprocess.Popen[str] | None = None
+        self._stderr = None
+        self._prompt_signature: tuple[tuple[str, str], ...] | None = None
+        self._request_id = 0
+        self._lock = threading.Lock()
+        atexit.register(self.close)
+
+    def recognize(
+        self, texts: Sequence[str], schemas: Sequence[EntitySchema]
+    ) -> list[list[EntityAnnotation]]:
+        if not texts:
+            return []
+        prompt_schemas = [
+            (schema.uie_prompt or schema.label, schema)
+            for schema in schemas
+            if (schema.uie_prompt or schema.label).strip()
+        ]
+        signature = tuple((prompt, schema.id) for prompt, schema in prompt_schemas)
+        with self._lock:
+            self._ensure_started(signature)
+            all_results: list[list[EntityAnnotation]] = []
+            for start in range(0, len(texts), self.batch_size):
+                batch = list(texts[start : start + self.batch_size])
+                response = self._request(batch)
+                raw_results = response.get("results")
+                if not isinstance(raw_results, list) or len(raw_results) != len(batch):
+                    raise RuntimeError("UIE worker returned an invalid result count.")
+                all_results.extend(
+                    _parse_uie_results(
+                        raw_results,
+                        batch,
+                        prompt_schemas,
+                        threshold=self.threshold,
+                    )
+                )
+            return all_results
+
+    def _ensure_started(self, signature: tuple[tuple[str, str], ...]) -> None:
+        if self._process is not None and self._process.poll() is None:
+            if signature != self._prompt_signature:
+                raise RuntimeError("UIE schema changed after the worker was started.")
+            return
+        if not self.python_path.exists():
+            raise RuntimeError(f"UIE Python executable does not exist: {self.python_path}")
+        if not self.worker_path.exists():
+            raise RuntimeError(f"UIE worker script does not exist: {self.worker_path}")
+
+        prompts = [prompt for prompt, _schema_id in signature]
+        self._stderr = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+        self._process = subprocess.Popen(
+            [
+                str(self.python_path),
+                str(self.worker_path),
+                "--model",
+                self.model_name,
+                "--schema-json",
+                json.dumps(prompts, ensure_ascii=False),
+                "--batch-size",
+                str(self.batch_size),
+                "--threshold",
+                str(self.threshold),
+                "--cache-only",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=self._stderr,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        )
+        self._prompt_signature = signature
+        ready = self._read_response(self.startup_timeout_seconds)
+        if ready.get("type") != "ready":
+            raise RuntimeError(f"UIE worker did not become ready: {ready}")
+
+    def _request(self, texts: list[str]) -> dict[str, Any]:
+        process = self._process
+        if process is None or process.stdin is None:
+            raise RuntimeError("UIE worker is not running.")
+        self._request_id += 1
+        request_id = str(self._request_id)
+        payload = {"id": request_id, "texts": texts}
+        try:
+            process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            process.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            raise RuntimeError(f"UIE worker input pipe failed: {exc}") from exc
+        response = self._read_response(self.request_timeout_seconds)
+        if response.get("id") != request_id:
+            raise RuntimeError("UIE worker returned a mismatched response id.")
+        if response.get("error"):
+            raise RuntimeError(f"UIE worker error: {response['error']}")
+        return response
+
+    def _read_response(self, timeout: float) -> dict[str, Any]:
+        process = self._process
+        if process is None or process.stdout is None:
+            raise RuntimeError("UIE worker output pipe is unavailable.")
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            if not selector.select(timeout):
+                raise TimeoutError(f"UIE worker timed out after {timeout:g} seconds.")
+            line = process.stdout.readline()
+        finally:
+            selector.close()
+        if not line:
+            code = process.poll()
+            detail = self._stderr_tail()
+            raise RuntimeError(
+                f"UIE worker exited unexpectedly (code={code})."
+                + (f" Diagnostics: {detail}" if detail else "")
+            )
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"UIE worker returned invalid JSON: {line[:200]!r}") from exc
+        if not isinstance(response, dict):
+            raise RuntimeError("UIE worker response must be a JSON object.")
+        return response
+
+    def _stderr_tail(self) -> str:
+        if self._stderr is None:
+            return ""
+        try:
+            self._stderr.flush()
+            self._stderr.seek(0)
+            return self._stderr.read()[-1000:].strip()
+        except Exception:
+            return ""
+
+    def close(self) -> None:
+        process = self._process
+        self._process = None
+        if process is not None:
+            if process.stdin is not None:
+                try:
+                    process.stdin.write('{"type":"shutdown"}\n')
+                    process.stdin.flush()
+                except (BrokenPipeError, OSError):
+                    pass
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+        if self._stderr is not None:
+            self._stderr.close()
+            self._stderr = None
+
+    def runtime_status(self) -> dict[str, Any]:
+        return {
+            "configured_backend": "uie",
+            "active_backend": "uie",
+            "fallback_used": False,
+            "model_name": self.model_name,
+        }
 
 
 class GLiNER2Recognizer:
@@ -221,6 +479,34 @@ def build_recognizer(config: dict[str, Any]) -> EntityRecognizer:
         return DisabledRecognizer()
     if backend == "regex":
         return RegexSchemaRecognizer()
+    if backend == "uie":
+        primary = UIESubprocessRecognizer(
+            model_name=config.get("model_name", "uie-medical-base"),
+            python_path=config.get("python_path", ".venv-uie/bin/python"),
+            threshold=float(config.get("threshold", 0.5)),
+            batch_size=int(config.get("batch_size", 8)),
+            startup_timeout_seconds=float(config.get("startup_timeout_seconds", 30)),
+            request_timeout_seconds=float(config.get("request_timeout_seconds", 120)),
+            worker_path=config.get("worker_path"),
+        )
+        fallback_name = str(config.get("fallback_backend", "regex")).lower()
+        fallback: EntityRecognizer
+        if fallback_name == "disabled":
+            fallback = DisabledRecognizer()
+        else:
+            fallback_name = "regex"
+            fallback = RegexSchemaRecognizer()
+        recognizer: EntityRecognizer = FallbackRecognizer(
+            primary,
+            fallback,
+            primary_name="uie",
+            fallback_name=fallback_name,
+        )
+        if bool(config.get("variant_regex", True)):
+            variants = _load_variant_patterns()
+            if variants:
+                return CompositeRecognizer(recognizer, RegexVariantRecognizer(variants))
+        return recognizer
     if backend == "gliner2":
         recognizer = GLiNER2Recognizer(
             model_name=config.get("model_name", "fastino/gliner2-base-v1"),
@@ -231,7 +517,7 @@ def build_recognizer(config: dict[str, Any]) -> EntityRecognizer:
         )
     else:
         raise ValueError(
-            "entity_extraction.backend must be one of: gliner2, regex, disabled."
+            "entity_extraction.backend must be one of: gliner2, uie, regex, disabled."
         )
 
     # Augment model NER with the deterministic variant recognizer (on by default).
@@ -258,6 +544,93 @@ def resolve_overlaps(
             continue
         accepted.append(candidate)
     return sorted(accepted, key=lambda ann: (ann.start, ann.end))
+
+
+def resolve_overlaps_by_group(
+    annotations: Sequence[EntityAnnotation],
+) -> list[EntityAnnotation]:
+    """Resolve competing spans within a semantic group, preserving cross-type spans."""
+    grouped: dict[str, list[EntityAnnotation]] = {}
+    for annotation in annotations:
+        key = annotation.schema_id or annotation.entity_group
+        grouped.setdefault(key, []).append(annotation)
+    resolved = [item for group in grouped.values() for item in resolve_overlaps(group)]
+    unique: dict[tuple[str, int, int, str], EntityAnnotation] = {}
+    for annotation in resolved:
+        key = (
+            annotation.schema_id or annotation.entity_group,
+            annotation.start,
+            annotation.end,
+            annotation.text,
+        )
+        current = unique.get(key)
+        if current is None or annotation.score > current.score:
+            unique[key] = annotation
+    return sorted(unique.values(), key=lambda ann: (ann.start, ann.end, ann.entity_group))
+
+
+def _resolve_executable(value: str) -> Path:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    # Do not resolve the final symlink: a venv's ``bin/python`` points at the base
+    # interpreter, and invoking that resolved target would lose the venv site-packages.
+    cwd_candidate = (Path.cwd() / path).absolute()
+    if cwd_candidate.exists():
+        return cwd_candidate
+    project_candidate = (Path(__file__).resolve().parents[3] / path).absolute()
+    return project_candidate
+
+
+def _parse_uie_results(
+    raw_results: Sequence[Any],
+    texts: Sequence[str],
+    prompt_schemas: Sequence[tuple[str, EntitySchema]],
+    *,
+    threshold: float,
+) -> list[list[EntityAnnotation]]:
+    prompt_map = {prompt: schema for prompt, schema in prompt_schemas}
+    parsed_results: list[list[EntityAnnotation]] = []
+    for raw_result, text in zip(raw_results, texts):
+        if not isinstance(raw_result, dict):
+            raise RuntimeError("UIE result item must be an object.")
+        annotations: list[EntityAnnotation] = []
+        for prompt, values in raw_result.items():
+            schema = prompt_map.get(str(prompt))
+            if schema is None or not isinstance(values, list):
+                continue
+            for raw in values:
+                if not isinstance(raw, dict):
+                    continue
+                start = _as_int(raw.get("start"))
+                end = _as_int(raw.get("end"))
+                score = float(raw.get("probability") or raw.get("score") or 0.0)
+                if (
+                    start is None
+                    or end is None
+                    or start < 0
+                    or end <= start
+                    or end > len(text)
+                    or score < threshold
+                ):
+                    continue
+                mention = text[start:end]
+                reported = str(raw.get("text") or "")
+                if reported and reported != mention:
+                    continue
+                annotations.append(
+                    EntityAnnotation(
+                        entity_group=schema.entity_group,
+                        text=mention,
+                        start=start,
+                        end=end,
+                        score=score,
+                        normalized_id=(NO_ENTITY_ID,),
+                        schema_id=schema.id,
+                    )
+                )
+        parsed_results.append(resolve_overlaps_by_group(annotations))
+    return parsed_results
 
 
 def _overlaps(left: EntityAnnotation, right: EntityAnnotation) -> bool:

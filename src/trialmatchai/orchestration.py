@@ -55,29 +55,34 @@ def ingest_inputs(
     strict = bool(patient_cfg.get("strict_validation", False))
 
     imported = 0
-    for raw in inputs:
-        profiles = import_patient_path(
-            raw,
-            input_format=input_format,
-            entity_annotator=entity_annotator,
-            strict=strict,
-        )
-        for profile in profiles:
-            profile_path = profile_dir / f"{profile.patient_id}.json"
-            if not force and is_valid_json_file(str(profile_path)):
-                logger.info("Ingest skipped (exists): %s", profile.patient_id)
-                continue
-            # Summary first, profile JSON last as the completion marker: a crash between them re-imports rather than orphaning a profile.
-            write_json_file(
-                profile_to_matching_summary(profile),
-                str(summary_dir / f"{profile.patient_id}.json"),
+    try:
+        for raw in inputs:
+            profiles = import_patient_path(
+                raw,
+                input_format=input_format,
+                entity_annotator=entity_annotator,
+                strict=strict,
             )
-            write_json_file(
-                profile.model_dump(mode="json", exclude_none=True),
-                str(profile_path),
-            )
-            imported += 1
-            logger.info("Ingested patient %s", profile.patient_id)
+            for profile in profiles:
+                profile_path = profile_dir / f"{profile.patient_id}.json"
+                if not force and is_valid_json_file(str(profile_path)):
+                    logger.info("Ingest skipped (exists): %s", profile.patient_id)
+                    continue
+                # Summary first, profile JSON last as the completion marker: a crash between them re-imports rather than orphaning a profile.
+                write_json_file(
+                    profile_to_matching_summary(profile),
+                    str(summary_dir / f"{profile.patient_id}.json"),
+                )
+                write_json_file(
+                    profile.model_dump(mode="json", exclude_none=True),
+                    str(profile_path),
+                )
+                imported += 1
+                logger.info("Ingested patient %s", profile.patient_id)
+    finally:
+        close = getattr(entity_annotator, "close", None)
+        if callable(close):
+            close()
 
     total = len(list(profile_dir.glob("*.json")))
     logger.info("Ingest stage: %s new, %s profiles total", imported, total)
@@ -555,7 +560,7 @@ def _load_manifest(path: Path) -> dict:
 
 
 # Bump a stage's version when a logic change must invalidate a cached completion.
-_PREPARE_STATE_VERSION = "1"
+_PREPARE_STATE_VERSION = "2"
 _LINK_STATE_VERSION = "1"
 _INDEX_STATE_VERSION = "1"
 
@@ -570,6 +575,10 @@ def _prepare_signature(config: dict) -> dict:
         "entity_backend": entity.get("backend"),
         "entity_model": entity.get("model_name"),
         "entity_threshold": entity.get("threshold"),
+        "entity_batch_size": entity.get("batch_size"),
+        "entity_python_path": entity.get("python_path"),
+        "entity_fallback_backend": entity.get("fallback_backend"),
+        "uie_worker_version": "1",
     }
 
 
@@ -635,7 +644,7 @@ def prepare_corpus(
     processed_criteria_folder: str | Path,
     force: bool = False,
     log_every: int = 500,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Embed + annotate normalized trial JSONs into processed_*; resumable.
 
     Streams one trial at a time (bounded memory), skips trials already prepared
@@ -680,27 +689,47 @@ def prepare_corpus(
     entity_annotator = build_entity_annotator(config, embedder=embedder)
 
     prepared = failed = 0
-    for i, path in enumerate(pending, start=1):
-        try:
-            doc = _read_json(path)
-            trial_row = prepare_trial_document(doc, embedder)
-            criteria_rows = prepare_criteria_documents(
-                doc, embedder, entity_annotator=entity_annotator
-            )
-            # Criteria first, trial JSON last as the resume completion marker: an interrupted trial is re-processed, not wrongly skipped.
-            write_prepared_criteria(criteria_rows, processed_criteria_folder)
-            write_prepared_trial(trial_row, processed_trials_folder)
-            prepared += 1
-        except Exception:
-            failed += 1
-            logger.exception("Prepare failed for %s (continuing)", path.name)
-        if i % log_every == 0:
-            logger.info("Prepare progress: %s/%s done, %s failed.", i, len(pending), failed)
+    try:
+        for i, path in enumerate(pending, start=1):
+            try:
+                doc = _read_json(path)
+                trial_row = prepare_trial_document(doc, embedder)
+                criteria_rows = prepare_criteria_documents(
+                    doc, embedder, entity_annotator=entity_annotator
+                )
+                # Criteria first, trial JSON last as the resume completion marker: an interrupted trial is re-processed, not wrongly skipped.
+                write_prepared_criteria(criteria_rows, processed_criteria_folder)
+                write_prepared_trial(trial_row, processed_trials_folder)
+                prepared += 1
+            except Exception:
+                failed += 1
+                logger.exception("Prepare failed for %s (continuing)", path.name)
+            if i % log_every == 0:
+                logger.info(
+                    "Prepare progress: %s/%s done, %s failed.",
+                    i,
+                    len(pending),
+                    failed,
+                )
+    finally:
+        close = getattr(entity_annotator, "close", None)
+        if callable(close):
+            close()
 
     logger.info(
         "Prepare complete: %s prepared, %s skipped, %s failed.", prepared, skipped, failed
     )
-    return {"total": len(all_paths), "prepared": prepared, "skipped": skipped, "failed": failed}
+    status = getattr(entity_annotator, "runtime_status", None)
+    entity_status = status() if callable(status) else {}
+    result: dict[str, Any] = {
+        "total": len(all_paths),
+        "prepared": prepared,
+        "skipped": skipped,
+        "failed": failed,
+    }
+    if entity_status:
+        result["entity_extraction"] = entity_status
+    return result
 
 
 def build_state(

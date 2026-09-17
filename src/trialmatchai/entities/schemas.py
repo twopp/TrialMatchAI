@@ -75,6 +75,11 @@ def parse_entity_schemas(raw: dict[str, Any]) -> list[EntitySchema]:
                 query_expansion=bool(entry.get("query_expansion", False)),
                 patterns=_string_tuple(entry.get("patterns", ())),
                 aliases=_string_tuple(entry.get("aliases", ())),
+                uie_prompt=(
+                    str(entry["uie_prompt"]).strip()
+                    if entry.get("uie_prompt")
+                    else None
+                ),
             )
         )
     return schemas
