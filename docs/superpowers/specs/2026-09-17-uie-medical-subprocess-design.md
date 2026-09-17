@@ -1,79 +1,79 @@
-# UIE Medical Subprocess Integration Design
+# UIE 中文医疗实体抽取独立进程接入设计
 
-## Goal
+## 目标
 
-Add Chinese medical entity extraction to the trial-registry preparation stage without installing PaddlePaddle or PaddleNLP into TrialMatchAI's existing PyTorch environment.
+在不向 TrialMatchAI 现有 PyTorch 环境安装 PaddlePaddle 和 PaddleNLP 的前提下，为临床试验库预处理阶段增加中文医疗实体抽取能力。
 
-The selected model is PaddleNLP `uie-medical-base`, already downloaded and smoke-tested in `.venv-uie` on the target Apple Silicon Mac. The integration improves structured annotations for Chinese trial eligibility criteria; it does not replace BGE-M3 retrieval, Qwen reranking, or DeepSeek eligibility assessment.
+选用的模型是 PaddleNLP `uie-medical-base`。该模型已经下载到目标 Apple Silicon Mac，并完成本地冒烟测试。此功能用于增强中文临床试验入排标准的结构化标注，不替代 BGE-M3 检索、Qwen 条件重排或 DeepSeek 入组资格评估。
 
-## Current State
+## 当前状态
 
-- The end-to-end patient-to-trial pipeline is working.
-- `BAAI/bge-m3` performs local retrieval.
-- `Qwen/Qwen3-Reranker-0.6B` performs local reranking.
-- DeepSeek performs criterion-level eligibility assessment.
-- Entity extraction currently uses deterministic regex rules.
-- `.venv-uie` contains PaddlePaddle 3.3.0, PaddleNLP 3.0.0b4, and `uie-medical-base`.
-- A local smoke test correctly extracted `非小细胞肺癌`, `奥希替尼`, and `EGFR L861Q`.
-- Measured local performance was approximately 1.0 second to load the cached model and 2.7 seconds to extract six entity categories from one short sentence.
+- 患者与临床试验的端到端匹配流程已经跑通。
+- `BAAI/bge-m3` 负责本地语义检索。
+- `Qwen/Qwen3-Reranker-0.6B` 负责本地条件重排。
+- DeepSeek 负责逐条入排标准的资格评估。
+- 医疗实体抽取目前使用固定正则规则。
+- `.venv-uie` 已安装 PaddlePaddle 3.3.0、PaddleNLP 3.0.0b4 和 `uie-medical-base`。
+- 本地测试已经正确识别 `非小细胞肺癌`、`奥希替尼` 和 `EGFR L861Q`。
+- 本机实测：缓存模型加载约 1.0 秒；从一段短文本中抽取6类实体约 2.7 秒。
 
-## Selected Architecture
+## 选定架构
 
-Keep PaddleNLP isolated from the main `.venv`. TrialMatchAI starts one persistent worker process with `.venv-uie/bin/python` during registry preparation and communicates with it through newline-delimited JSON over standard input and output.
+PaddleNLP 与主项目的 `.venv` 保持隔离。TrialMatchAI 在构建试验库时，使用 `.venv-uie/bin/python` 启动一个持续运行的 UIE 工作进程，通过标准输入和标准输出传输逐行 JSON 数据。
 
 ```text
-Trial criteria preparation (main .venv)
+临床试验条件预处理（主 .venv）
         |
-        | JSON batches
+        | JSON 批次
         v
-Persistent UIE worker (.venv-uie, CPU)
+持续运行的 UIE 工作进程（.venv-uie，CPU）
         |
-        | extracted spans + probabilities
+        | 实体文本、位置和置信度
         v
-TrialMatchAI EntityAnnotation objects
+TrialMatchAI 的 EntityAnnotation 对象
         |
-        +-- deterministic variant augmentation
-        +-- optional concept linking
+        +-- 固定规则补充基因突变
+        +-- 可选的标准医学概念关联
         v
-Prepared criteria and LanceDB index
+处理后的试验条件和 LanceDB 索引
 ```
 
-The worker loads `uie-medical-base` once and serves every trial processed by the build. It must not launch and reload the model once per criterion or once per trial.
+工作进程只加载一次 `uie-medical-base`，并为本次构建中的所有临床试验提供服务。不能为每条条件或每个试验重复启动进程、重复加载模型。
 
-## Components
+## 组成部分
 
-### UIE subprocess recognizer
+### UIE 独立进程识别器
 
-Add a `uie` entity backend implementing the existing `EntityRecognizer` protocol. It will:
+新增一个实现现有 `EntityRecognizer` 接口的 `uie` 实体抽取后端，负责：
 
-- resolve the configured Python executable relative to the project directory;
-- start the standalone worker lazily on the first extraction request;
-- wait for a structured ready message;
-- send batches of texts and extraction prompts as JSON;
-- validate worker responses before converting them to `EntityAnnotation` values;
-- keep the process alive across repeated `recognize` calls;
-- terminate and reap the process when the recognizer is closed or the parent exits.
+- 根据项目目录解析配置的 Python 可执行文件路径；
+- 第一次收到抽取请求时再启动独立工作进程；
+- 等待工作进程返回结构化的“准备完成”消息；
+- 通过 JSON 发送成批文本和实体类别提示词；
+- 校验工作进程的返回结果，再转换成 `EntityAnnotation`；
+- 多次调用 `recognize` 时复用同一个工作进程；
+- 识别器关闭或主进程退出时，正确终止并回收工作进程。
 
-The main process must not import PaddlePaddle or PaddleNLP.
+主项目进程不能直接导入 PaddlePaddle 或 PaddleNLP。
 
-### Standalone worker
+### 独立 UIE 工作程序
 
-Add a worker script that imports only the Python standard library, PaddlePaddle, and PaddleNLP. It will:
+新增一个只依赖 Python 标准库、PaddlePaddle 和 PaddleNLP 的工作程序，负责：
 
-- force CPU inference with FP32;
-- load `uie-medical-base` from the existing local cache;
-- accept JSON-lines requests;
-- run batched information extraction;
-- return original text spans, offsets, labels, and probabilities;
-- return structured error messages rather than Python tracebacks on stdout.
+- 强制使用 CPU 和 FP32 精度推理；
+- 从已有本地缓存加载 `uie-medical-base`；
+- 接收逐行 JSON 请求；
+- 批量执行信息抽取；
+- 返回原文实体、起止位置、类别和置信度；
+- 出错时在标准输出中返回结构化错误，而不是输出 Python 堆栈。
 
-Warnings and framework diagnostics go to stderr so they cannot corrupt the JSON protocol.
+框架警告和诊断信息输出到标准错误，不能污染标准输出中的 JSON 通信协议。
 
-### Chinese prompt mapping
+### 中文实体类别映射
 
-Extend the entity schema with an optional UIE prompt for every supported type. Initial prompts are:
+为每个受支持的实体类别增加可选的 UIE 中文提示词。初始映射如下：
 
-| Schema ID | UIE prompt |
+| 项目内部类别 | UIE 中文提示词 |
 |---|---|
 | `disease` | 疾病 |
 | `gene` | 基因 |
@@ -87,17 +87,17 @@ Extend the entity schema with an optional UIE prompt for every supported type. I
 | `species` | 物种 |
 | `variant` | 基因突变 |
 
-Worker responses map back to the existing schema ID and entity group. UIE-specific labels must not leak into downstream interfaces.
+工作进程的返回结果会重新映射为项目现有的内部类别和实体分组，UIE 专用类别名称不能泄漏到后续接口中。
 
-### Confidence and overlaps
+### 置信度与重叠实体
 
-Use a UIE confidence threshold of 0.5 initially, matching PaddleNLP's documented/default span threshold and retaining the successful smoke-test drug extraction at 0.739. The value remains configurable.
+UIE 初始置信度阈值设为 0.5，与 PaddleNLP 默认的文本片段阈值一致，同时能够保留本次测试中置信度为 0.739 的“奥希替尼”。该阈值可以通过配置修改。
 
-Preserve overlapping spans when they represent different schema types, such as `EGFR L861Q` classified as both gene and genetic variant. Resolve duplicate or overlapping spans only within the same schema type. The deterministic genetic-variant recognizer remains enabled and exact duplicate annotations are deduplicated.
+当同一段文字代表不同实体类别时，保留重叠结果。例如，`EGFR L861Q` 可以同时被识别为基因和基因突变。只有相同实体类别内部的重复或重叠结果才进行冲突消解。现有固定基因突变规则继续启用，完全相同的实体结果需要去重。
 
-## Configuration
+## 配置
 
-Extend `entity_extraction` with settings equivalent to:
+扩展 `entity_extraction` 配置，增加以下设置：
 
 ```json
 {
@@ -113,59 +113,59 @@ Extend `entity_extraction` with settings equivalent to:
 }
 ```
 
-`config.mac.json` will opt into this backend. The repository default configuration remains unchanged so other installations do not unexpectedly require `.venv-uie`.
+`config.mac.json` 将启用该后端。仓库默认配置保持不变，防止其他环境在没有 `.venv-uie` 时被强制依赖该模型。
 
-The configured Python path and worker script must be included in the prepare-stage build signature. Changing either invalidates prepared criteria so stale regex-only annotations are not reused.
+配置的 Python 路径和 UIE 工作程序必须计入预处理阶段的构建签名。修改实体后端、模型或工作程序后，需要重新处理临床试验条件，不能继续使用旧的正则抽取结果。
 
-## Error Handling
+## 错误处理
 
-A UIE technical failure means the worker cannot produce a valid extraction response. Examples include a missing executable, missing/corrupt model files, startup failure, timeout, premature process exit, malformed JSON, or an out-of-memory error. An empty but valid extraction result is not a technical failure.
+UIE 技术故障是指工作进程无法返回有效的实体抽取结果，包括：Python 可执行文件不存在、模型文件缺失或损坏、启动失败、处理超时、进程提前退出、返回的 JSON 格式错误或内存不足。成功返回空实体列表不属于技术故障。
 
-On the first technical failure:
+第一次发生技术故障时：
 
-1. log one clear warning containing the non-sensitive failure reason;
-2. stop and reap the UIE worker;
-3. switch the recognizer to regex for the failed batch and all remaining batches in that build;
-4. continue registry preparation rather than aborting the build;
-5. expose the fallback in logs and build metadata so it is never silent.
+1. 在日志中显示一次包含非敏感原因的明确警告；
+2. 停止并回收 UIE 工作进程；
+3. 对失败批次以及本次构建剩余的所有批次改用正则规则；
+4. 继续构建试验库，不让整个构建过程失败；
+5. 在日志和构建元数据中记录降级状态，不能静默回退。
 
-The worker must not automatically download a missing model during normal offline builds. A missing cache is an actionable startup failure and triggers the documented fallback.
+正常离线构建时，工作进程不能自动下载缺失模型。本地缓存不存在时应当报告可操作的启动错误，并按上述方案回退到正则规则。
 
-## Performance
+## 性能
 
-The persistent-worker design avoids repeated model startup. Batching is used within the worker, starting at eight criteria per batch and reducible through configuration if memory pressure appears.
+持续运行的工作进程可以避免重复加载模型。工作进程内部采用批量处理，初始批次大小为8；如果出现内存压力，可以通过配置降低批次大小。
 
-For the current 29-criterion test trial, the acceptance target is completion within five minutes on the target Mac CPU. This is a generous functional ceiling, not a throughput claim. Large registry imports remain offline build work and may take hours; normal patient matching uses the stored annotations and does not rerun UIE.
+当前测试试验共有29条条件，在目标 Mac CPU 上的验收要求是5分钟内完成。这是保证功能可用的宽松上限，不代表大型试验库的性能承诺。大规模试验库导入属于离线构建任务，可能需要数小时；日常患者匹配会直接使用已经保存的实体结果，不会重新运行 UIE。
 
-## Testing
+## 测试方案
 
-1. Unit-test schema prompt parsing and validation.
-2. Unit-test UIE response conversion, offsets, thresholds, cross-type overlaps, and deduplication without loading Paddle.
-3. Unit-test subprocess startup, request/response handling, timeout, malformed response, process exit, and cleanup with a fake worker.
-4. Unit-test regex fallback and verify it is logged and recorded.
-5. Keep all existing GLiNER2, regex, disabled-backend, preparation, configuration, and preflight tests green.
-6. Run a local live smoke test against cached `uie-medical-base` with synthetic Chinese medical text.
-7. Rebuild the supplied `ALSC013AST2818` trial and verify all 29 criteria complete.
-8. Inspect representative Chinese criteria for disease, drug, gene, variant, test, and procedure entities.
-9. Rerun the three synthetic patient matches and verify report generation remains successful.
+1. 测试中文实体提示词的读取和校验。
+2. 在不加载 Paddle 的情况下，测试 UIE 返回结果的转换、位置、置信度、跨类别重叠和去重。
+3. 使用假的工作程序测试进程启动、请求和响应、超时、错误 JSON、进程退出和清理。
+4. 测试正则回退，并确认日志和构建状态明确记录此次回退。
+5. 保证现有 GLiNER2、正则、禁用实体抽取、试验预处理、配置和预检查测试继续通过。
+6. 使用缓存的 `uie-medical-base` 和合成中文医学文本运行本地冒烟测试。
+7. 重新构建用户提供的 `ALSC013AST2818` 试验，确认29条条件全部处理完成。
+8. 检查代表性中文条件中的疾病、药物、基因、突变、检查和治疗实体。
+9. 重新匹配3名合成患者，确认匹配报告仍能成功生成。
 
-No real patient data is required for implementation testing.
+实现和验证过程不需要使用真实患者数据。
 
-## Acceptance Criteria
+## 验收标准
 
-- The main TrialMatchAI process never imports PaddlePaddle or PaddleNLP.
-- One UIE worker is reused throughout a registry build.
-- Chinese medical entities are stored in prepared criterion documents using the existing annotation shape.
-- The current 29-criterion test corpus completes within five minutes on the target Mac.
-- A UIE technical failure visibly falls back to regex without aborting the build.
-- Existing retrieval, Qwen reranking, DeepSeek assessment, and reports remain operational.
-- Rebuilding is triggered when the entity backend, model, worker executable, worker implementation, or confidence threshold changes.
+- TrialMatchAI 主进程不导入 PaddlePaddle 或 PaddleNLP。
+- 一次试验库构建全程复用同一个 UIE 工作进程。
+- 中文医疗实体使用项目现有数据格式保存到处理后的试验条件中。
+- 当前29条测试条件在目标 Mac 上5分钟内处理完成。
+- UIE 技术故障时，系统明确提示并回退正则规则，不中断整个构建。
+- 现有 BGE 检索、Qwen 重排、DeepSeek 评估和报告功能继续正常工作。
+- 修改实体后端、模型、工作进程、Python 路径或置信度时，系统会触发重新处理，而不是使用过期结果。
 
-## Out of Scope
+## 不在本次范围内的内容
 
-- Patient-summary generation or translation.
-- Replacing BGE-M3, Qwen, or DeepSeek.
-- UIE fine-tuning or clinical accuracy claims.
-- GPU/MPS acceleration for PaddlePaddle on macOS.
-- Remote UIE services.
-- Automatic installation or repair of `.venv-uie` during a normal build.
+- 患者 Summary 的生成或翻译。
+- 替换 BGE-M3、Qwen 或 DeepSeek。
+- UIE 微调或临床准确性声明。
+- 在 macOS 上使用 GPU/MPS 加速 PaddlePaddle。
+- 远程 UIE 服务。
+- 正常构建时自动安装或修复 `.venv-uie`。
